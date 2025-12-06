@@ -50,6 +50,7 @@ final class MPVMetalViewController: NSViewController {
     override func loadView() {
         self.view = NSView(frame: .init(x: 0, y: 0, width: NSScreen.main!.frame.width, height: NSScreen.main!.frame.height))
         self.view.wantsLayer = true
+        self.view.layer?.backgroundColor = NSColor.black.cgColor
     }
     
     override func viewDidLoad() {
