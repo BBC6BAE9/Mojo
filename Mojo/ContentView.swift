@@ -32,6 +32,7 @@ struct ContentView: View {
                     }
                 }
         }
+        .contentToolbar(for: , content: <#T##() -> View#>)
         .containerBackground(.yellow, for: .window)
         .focusable()
         .overlay{
