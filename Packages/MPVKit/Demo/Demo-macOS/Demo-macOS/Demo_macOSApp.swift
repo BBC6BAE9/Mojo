@@ -6,6 +6,6 @@ struct Demo_macOSApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.hiddenTitleBar)
+//        .windowStyle(.hiddenTitleBar)
     }
 }

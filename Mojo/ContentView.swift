@@ -17,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         VStack {
             MPVMetalPlayerView(coordinator: coordinator)
-                .play(URL(string: "https://framatube.org/static/streaming-playlists/hls/66fcff64-d8f9-49c1-8deb-011b115786de/73451ad8-d30e-4beb-aa92-3dba23ba07c8-720.m3u8")!)
+                .play(URL(string: "http://192.161.51.202:8096/emby/Videos/595618/stream?Static=true&api_key=0188a76fdedf433183c338f0fec97e92")!)
                 .onPropertyChange{ player, propertyName, propertyData in
                     switch propertyName {
                     case MPVProperty.videoParamsSigPeak:
@@ -32,7 +32,13 @@ struct ContentView: View {
                     }
                 }
         }
+        .containerBackground(.yellow, for: .window)
         .focusable()
+        .overlay{
+//            RoundedRectangle(cornerRadius: 16)
+//                .frame(width: 500.0, height: 100.0)
+//                .glassEffect(in: .rect(cornerRadius: 16.0))
+        }
 //        .overlay {
 //            HStack {
 //                VStack(alignment: .leading, spacing: 12) {

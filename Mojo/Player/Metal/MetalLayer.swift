@@ -26,9 +26,9 @@ class MetalLayer: CAMetalLayer {
             if Thread.isMainThread {
                 super.wantsExtendedDynamicRangeContent = newValue
             } else {
-                DispatchQueue.main.sync {
-                    super.wantsExtendedDynamicRangeContent = newValue
-                }
+            DispatchQueue.main.async {
+                super.wantsExtendedDynamicRangeContent = newValue
+            }
             }
         }
     }

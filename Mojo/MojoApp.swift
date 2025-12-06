@@ -13,5 +13,6 @@ struct MojoApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowStyle(.titleBar)
     }
 }

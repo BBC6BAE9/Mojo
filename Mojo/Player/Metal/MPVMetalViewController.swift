@@ -23,10 +23,13 @@ final class MPVMetalViewController: NSViewController {
             // FIXME: target-colorspace-hint does not support being changed at runtime.
             // this option should be set when mpv init otherwise can cause player slow and hangs.
             // not recommended to use this way.
-            if hdrEnabled {
-                checkError(mpv_set_option_string(mpv, "target-colorspace-hint", "yes"))
-            } else {
-                checkError(mpv_set_option_string(mpv, "target-colorspace-hint", "no"))
+            queue.async { [weak self] in
+                guard let self, self.mpv != nil else { return }
+                if self.hdrEnabled {
+                    self.checkError(mpv_set_option_string(self.mpv, "target-colorspace-hint", "yes"))
+                } else {
+                    self.checkError(mpv_set_option_string(self.mpv, "target-colorspace-hint", "no"))
+                }
             }
         }
     }
@@ -47,6 +50,7 @@ final class MPVMetalViewController: NSViewController {
     override func loadView() {
         self.view = NSView(frame: .init(x: 0, y: 0, width: NSScreen.main!.frame.width, height: NSScreen.main!.frame.height))
         self.view.wantsLayer = true
+        self.view.layer?.backgroundColor = NSColor.black.cgColor
     }
     
     override func viewDidLoad() {
@@ -80,8 +84,41 @@ final class MPVMetalViewController: NSViewController {
             object: nil
         )
         
-        if let url = playUrl {
-            loadFile(url)
+        // 添加双指缩放手势识别器
+        let magnificationGesture = NSMagnificationGestureRecognizer(target: self, action: #selector(handleMagnification(_:)))
+        view.addGestureRecognizer(magnificationGesture)
+    }
+    
+    // MARK: - Gesture Handling (手势处理)
+    
+    /// 累计缩放量，用于判断是放大还是缩小
+    private var cumulativeMagnification: CGFloat = 0
+    
+    @objc private func handleMagnification(_ gesture: NSMagnificationGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            cumulativeMagnification = 0
+            
+        case .changed:
+            cumulativeMagnification += gesture.magnification
+            gesture.magnification = 0
+            
+        case .ended:
+            guard let window = view.window else { return }
+            
+            let threshold: CGFloat = 0.25
+            let isFullscreen = window.styleMask.contains(.fullScreen)
+            
+            if cumulativeMagnification > threshold && !isFullscreen {
+                // 双指放大 → 进入全屏
+                window.toggleFullScreen(nil)
+            } else if cumulativeMagnification < -threshold && isFullscreen {
+                // 双指缩小 → 退出全屏
+                window.toggleFullScreen(nil)
+            }
+            
+        default:
+            break
         }
     }
     
@@ -132,12 +169,7 @@ final class MPVMetalViewController: NSViewController {
         
         // 设置 metalLayer 的 frame 为原始视频尺寸
         metalLayer.frame = CGRect(origin: .zero, size: videoSize)
-        
-        // 设置 drawable size 为原始视频尺寸（乘以 backing scale）
-        metalLayer.drawableSize = CGSize(
-            width: videoSize.width * backingScale,
-            height: videoSize.height * backingScale
-        )
+        // 注意：不要手动设置 drawableSize，让 mpv/MoltenVK 自己管理，避免主线程阻塞
         
         // 添加 metalLayer 作为子图层（不是 backing layer）
         // 这样我们可以在 videoDisplayView 上应用 transform
@@ -145,13 +177,22 @@ final class MPVMetalViewController: NSViewController {
         
         print("🎬 Initial metalLayer setup: frame=\(metalLayer.frame), drawableSize=\(metalLayer.drawableSize)")
         
-        // 设置 MPV
-        setupMpv()
-        
-        playSetupFinished = true
-        
-        // 立即进行一次布局
-        setVideoViewCenter()
+        // 设置 MPV（在后台线程执行以避免阻塞主线程）
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.setupMpv()
+            
+            DispatchQueue.main.async {
+                self.playSetupFinished = true
+                // 立即进行一次布局
+                self.setVideoViewCenter()
+                
+                // 如果有待播放的 URL，开始加载
+                if let url = self.playUrl {
+                    self.loadFile(url)
+                }
+            }
+        }
     }
     
     /// 设置视频视图居中并缩放以适应容器（iOS 风格的 transform 缩放）
@@ -203,18 +244,9 @@ final class MPVMetalViewController: NSViewController {
         
         // 6. metalLayer 保持原始视频尺寸
         metalLayer.frame = CGRect(origin: .zero, size: sourceSize)
-        
-        // 7. 更新 drawable size（使用原始视频尺寸乘以 backing scale）
-        let backingScale = view.window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
-        metalLayer.drawableSize = CGSize(
-            width: sourceSize.width * backingScale,
-            height: sourceSize.height * backingScale
-        )
-        metalLayer.contentsScale = backingScale
+        // 注意：不要手动设置 drawableSize，让 mpv/MoltenVK 自己管理
         
         CATransaction.commit()
-        
-        print("🎬 Video view centered: sourceSize=\(sourceSize), scale=\(scale), containerSize=\(containerSize)")
     }
     
     // MARK: - MPV Setup
@@ -339,9 +371,11 @@ final class MPVMetalViewController: NSViewController {
     }
     
     func setFlag(_ name: String, _ flag: Bool) {
-        guard mpv != nil else { return }
-        var data: Int = flag ? 1 : 0
-        mpv_set_property(mpv, name, MPV_FORMAT_FLAG, &data)
+        queue.async { [weak self] in
+            guard let self, self.mpv != nil else { return }
+            var data: Int = flag ? 1 : 0
+            mpv_set_property(self.mpv, name, MPV_FORMAT_FLAG, &data)
+        }
     }
     
     func command(
@@ -350,22 +384,24 @@ final class MPVMetalViewController: NSViewController {
         checkForErrors: Bool = true,
         returnValueCallback: ((Int32) -> Void)? = nil
     ) {
-        guard mpv != nil else {
-            return
-        }
-        var cargs = makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
-        defer {
-            for ptr in cargs where ptr != nil {
-                free(UnsafeMutablePointer(mutating: ptr!))
+        queue.async { [weak self] in
+            guard let self, self.mpv != nil else { return }
+            
+            var cargs = self.makeCArgs(command, args).map { $0.flatMap { UnsafePointer<CChar>(strdup($0)) } }
+            defer {
+                for ptr in cargs where ptr != nil {
+                    free(UnsafeMutablePointer(mutating: ptr!))
+                }
             }
-        }
-        //print("\(command) -- \(args)")
-        let returnValue = mpv_command(mpv, &cargs)
-        if checkForErrors {
-            checkError(returnValue)
-        }
-        if let cb = returnValueCallback {
-            cb(returnValue)
+            let returnValue = mpv_command(self.mpv, &cargs)
+            if checkForErrors {
+                self.checkError(returnValue)
+            }
+            if let cb = returnValueCallback {
+                DispatchQueue.main.async {
+                    cb(returnValue)
+                }
+            }
         }
     }
     
@@ -413,18 +449,32 @@ final class MPVMetalViewController: NSViewController {
                             DispatchQueue.main.async {
                                 self.playDelegate?.propertyChange(mpv: self.mpv, propertyName: propertyName, data: buffering)
                             }
-                        case "video-params/w", "video-params/h":
-                            // 当视频参数变化时，更新视频尺寸
-                            DispatchQueue.main.async {
-                                self.updateVideoSizeFromMPV()
+                        case "video-params/w":
+                            // 直接从事件数据中获取宽度值
+                            if let width = UnsafePointer<Int64>(OpaquePointer(property.data))?.pointee, width > 0 {
+                                DispatchQueue.main.async {
+                                    self.updateVideoWidth(Int(width))
+                                }
+                            }
+                        case "video-params/h":
+                            // 直接从事件数据中获取高度值
+                            if let height = UnsafePointer<Int64>(OpaquePointer(property.data))?.pointee, height > 0 {
+                                DispatchQueue.main.async {
+                                    self.updateVideoHeight(Int(height))
+                                }
                             }
                         default: break
                         }
                     }
                     
                 case MPV_EVENT_FILE_LOADED:
-                    DispatchQueue.main.async {
-                        self.updateVideoSizeFromMPV()
+                    // 在后台线程获取视频尺寸，避免阻塞主线程
+                    let width = self.getInt("width")
+                    let height = self.getInt("height")
+                    if width > 0 && height > 0 {
+                        DispatchQueue.main.async {
+                            self.updateVideoSize(width: width, height: height)
+                        }
                     }
                     
                 case MPV_EVENT_SHUTDOWN:
@@ -444,38 +494,45 @@ final class MPVMetalViewController: NSViewController {
         }
     }
     
-    /// 从 MPV 获取视频尺寸并更新布局
-    private func updateVideoSizeFromMPV() {
-        let width = getInt("video-params/w")
-        let height = getInt("video-params/h")
-        
-        guard width > 0, height > 0 else { return }
-        
+    /// 缓存的视频宽度
+    private var cachedVideoWidth: Int = 0
+    /// 缓存的视频高度
+    private var cachedVideoHeight: Int = 0
+    
+    /// 更新视频宽度（从属性变化事件直接获取）
+    private func updateVideoWidth(_ width: Int) {
+        cachedVideoWidth = width
+        if cachedVideoHeight > 0 {
+            updateVideoSize(width: cachedVideoWidth, height: cachedVideoHeight)
+        }
+    }
+    
+    /// 更新视频高度（从属性变化事件直接获取）
+    private func updateVideoHeight(_ height: Int) {
+        cachedVideoHeight = height
+        if cachedVideoWidth > 0 {
+            updateVideoSize(width: cachedVideoWidth, height: cachedVideoHeight)
+        }
+    }
+    
+    /// 更新视频尺寸并刷新布局（不阻塞主线程）
+    private func updateVideoSize(width: Int, height: Int) {
         let newSize = CGSize(width: width, height: height)
         
         // 只有当尺寸真正变化时才更新
-        if videoSize != newSize {
-            print("🎬 Video size updated from MPV: \(width)x\(height)")
-            videoSize = newSize
-            
-            // 更新 metalLayer 的 frame 和 drawable size 为新的视频尺寸
-            let backingScale = view.window?.screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
-            
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            
-            metalLayer.frame = CGRect(origin: .zero, size: newSize)
-            metalLayer.drawableSize = CGSize(
-                width: newSize.width * backingScale,
-                height: newSize.height * backingScale
-            )
-            
-            CATransaction.commit()
-            
-            // 更新布局
-            if playSetupFinished {
-                setVideoViewCenter()
-            }
+        guard videoSize != newSize else { return }
+        
+        print("🎬 Video size updated: \(width)x\(height)")
+        videoSize = newSize
+        cachedVideoWidth = width
+        cachedVideoHeight = height
+        
+        // 设置窗口 aspectRatio，锁定窗口只能按视频比例缩放
+        view.window?.aspectRatio = newSize
+        
+        // 更新布局（setVideoViewCenter 会更新 metalLayer.frame，但不设置 drawableSize）
+        if playSetupFinished {
+            setVideoViewCenter()
         }
     }
     
