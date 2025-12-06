@@ -32,7 +32,13 @@ struct ContentView: View {
                     }
                 }
         }
+        .containerBackground(.yellow, for: .window)
         .focusable()
+        .overlay{
+//            RoundedRectangle(cornerRadius: 16)
+//                .frame(width: 500.0, height: 100.0)
+//                .glassEffect(in: .rect(cornerRadius: 16.0))
+        }
 //        .overlay {
 //            HStack {
 //                VStack(alignment: .leading, spacing: 12) {

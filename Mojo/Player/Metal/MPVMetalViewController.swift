@@ -83,6 +83,43 @@ final class MPVMetalViewController: NSViewController {
             name: NSWindow.didResizeNotification,
             object: nil
         )
+        
+        // 添加双指缩放手势识别器
+        let magnificationGesture = NSMagnificationGestureRecognizer(target: self, action: #selector(handleMagnification(_:)))
+        view.addGestureRecognizer(magnificationGesture)
+    }
+    
+    // MARK: - Gesture Handling (手势处理)
+    
+    /// 累计缩放量，用于判断是放大还是缩小
+    private var cumulativeMagnification: CGFloat = 0
+    
+    @objc private func handleMagnification(_ gesture: NSMagnificationGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            cumulativeMagnification = 0
+            
+        case .changed:
+            cumulativeMagnification += gesture.magnification
+            gesture.magnification = 0
+            
+        case .ended:
+            guard let window = view.window else { return }
+            
+            let threshold: CGFloat = 0.25
+            let isFullscreen = window.styleMask.contains(.fullScreen)
+            
+            if cumulativeMagnification > threshold && !isFullscreen {
+                // 双指放大 → 进入全屏
+                window.toggleFullScreen(nil)
+            } else if cumulativeMagnification < -threshold && isFullscreen {
+                // 双指缩小 → 退出全屏
+                window.toggleFullScreen(nil)
+            }
+            
+        default:
+            break
+        }
     }
     
     override func viewDidLayout() {
