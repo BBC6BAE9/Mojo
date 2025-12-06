@@ -17,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         VStack {
             MPVMetalPlayerView(coordinator: coordinator)
-                .play(URL(string: "https://framatube.org/static/streaming-playlists/hls/66fcff64-d8f9-49c1-8deb-011b115786de/73451ad8-d30e-4beb-aa92-3dba23ba07c8-720.m3u8")!)
+                .play(URL(string: "https://ppvod01.kqgfbs.com/splitOut/20251107/1128626/V20251107161833614851128626/index.m3u8?t=6934854a&whip=183.241.96.82&sign=1cb37be8ec90a7c8266a9cd2d19e37a34a6db1a2")!)
                 .onPropertyChange{ player, propertyName, propertyData in
                     switch propertyName {
                     case MPVProperty.videoParamsSigPeak:

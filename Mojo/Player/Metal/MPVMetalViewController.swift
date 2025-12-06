@@ -489,6 +489,9 @@ final class MPVMetalViewController: NSViewController {
         cachedVideoWidth = width
         cachedVideoHeight = height
         
+        // 设置窗口 aspectRatio，锁定窗口只能按视频比例缩放
+        view.window?.aspectRatio = newSize
+        
         // 更新布局（setVideoViewCenter 会更新 metalLayer.frame，但不设置 drawableSize）
         if playSetupFinished {
             setVideoViewCenter()
