@@ -6,18 +6,49 @@ import Libmpv
 // warning: metal API validation has been disabled to ignore crash when playing HDR videos.
 // Edit Scheme -> Run -> Diagnostics -> Metal API Validation -> Turn it off
 // https://github.com/KhronosGroup/MoltenVK/issues/2226
-final class MPVMetalViewController: NSViewController {
+final class MPVMetalViewController: NSViewController, PlayerContext {
     
     // MARK: - Properties
     
     var metalLayer = MetalLayer()
     var mpv: OpaquePointer!
-    var playDelegate: MPVPlayerDelegate?
     var edrRange: CGFloat?
     lazy var queue = DispatchQueue(label: "mpv", qos: .userInitiated)
     
     var playUrl: URL?
     var hdrAvailable: Bool = false
+    
+    // MARK: - Plugin System Properties
+    
+    /// 插件管理器
+    let pluginManager = PluginManager()
+    
+    /// 当前播放器状态
+    private(set) var state: PlayerState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pluginManager.notifyStateChange(self.state, previous: oldValue)
+            }
+        }
+    }
+    
+    /// 当前播放时间（秒）
+    private(set) var currentTime: TimeInterval = 0
+    
+    /// 当前视频时长（秒）
+    private(set) var duration: TimeInterval = 0
+    
+    /// 是否正在缓冲
+    private(set) var isBuffering: Bool = false
+    
+    /// 当前音量 (0 ~ 100)
+    private(set) var volume: Double = 100
+    
+    /// 是否静音
+    private(set) var isMuted: Bool = false
+    
     var hdrEnabled = false {
         didSet {
             // FIXME: target-colorspace-hint does not support being changed at runtime.
@@ -56,6 +87,9 @@ final class MPVMetalViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        // 设置插件管理器的上下文
+        pluginManager.context = self
+        
         // 使用默认尺寸初始化播放逻辑
         videoSize = CGSize(width: 1920, height: 1080)
         setupPlayLogic()
@@ -71,7 +105,7 @@ final class MPVMetalViewController: NSViewController {
             if let screen = NSScreen.screens.first {
                 let maxRange = screen.maximumExtendedDynamicRangeColorComponentValue
                 DispatchQueue.main.async {
-                    self.playDelegate?.propertyChange(mpv: self.mpv, propertyName: "edr", data: maxRange)
+                    self.edrRange = maxRange
                 }
             }
         }
@@ -296,6 +330,15 @@ final class MPVMetalViewController: NSViewController {
         mpv_observe_property(mpv, 0, "video-params/w", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "video-params/h", MPV_FORMAT_INT64)
         
+        // 插件系统：观察播放状态和时间
+        mpv_observe_property(mpv, 0, MPVProperty.pause, MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, MPVProperty.timePos, MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, MPVProperty.duration, MPV_FORMAT_DOUBLE)
+        
+        // 观察音量
+        mpv_observe_property(mpv, 0, MPVProperty.volume, MPV_FORMAT_DOUBLE)
+        mpv_observe_property(mpv, 0, MPVProperty.mute, MPV_FORMAT_FLAG)
+        
         mpv_set_wakeup_callback(self.mpv, { (ctx) in
             guard let client = ctx else { return }
             let viewController = Unmanaged<MPVMetalViewController>.fromOpaque(client).takeUnretainedValue()
@@ -310,6 +353,9 @@ final class MPVMetalViewController: NSViewController {
         time: Double? = nil
     ) {
         self.playUrl = url
+        
+        // 设置加载状态
+        state = .loading
         
         var args = [url.absoluteString]
         var options = [String]()
@@ -328,7 +374,7 @@ final class MPVMetalViewController: NSViewController {
         command("loadfile", args: args)
     }
     
-    // MARK: - Playback Controls
+    // MARK: - Playback Controls (PlayerContext)
     
     func play() {
         setFlag("pause", false)
@@ -338,12 +384,49 @@ final class MPVMetalViewController: NSViewController {
         setFlag("pause", true)
     }
     
+    func togglePlayPause() {
+        if state == .playing {
+            pause()
+        } else {
+            play()
+        }
+    }
+    
     func seek(relative time: TimeInterval) {
         command("seek", args: [String(time), "relative"])
     }
     
     func seek(absolute time: TimeInterval) {
         command("seek", args: [String(time), "absolute"])
+    }
+    
+    func seek(progress: Double) {
+        guard duration > 0 else { return }
+        let targetTime = duration * max(0, min(1, progress))
+        seek(absolute: targetTime)
+    }
+    
+    // MARK: - Volume Controls (音量控制)
+    
+    func setVolume(_ volume: Double) {
+        let clampedVolume = max(0, min(100, volume))
+        queue.async { [weak self] in
+            guard let self, self.mpv != nil else { return }
+            var vol = clampedVolume
+            mpv_set_property(self.mpv, MPVProperty.volume, MPV_FORMAT_DOUBLE, &vol)
+        }
+    }
+    
+    func setMuted(_ muted: Bool) {
+        queue.async { [weak self] in
+            guard let self, self.mpv != nil else { return }
+            var data: Int = muted ? 1 : 0
+            mpv_set_property(self.mpv, MPVProperty.mute, MPV_FORMAT_FLAG, &data)
+        }
+    }
+    
+    func toggleMute() {
+        setMuted(!isMuted)
     }
     
     // MARK: - MPV Property Accessors
@@ -441,13 +524,40 @@ final class MPVMetalViewController: NSViewController {
                                     let maxEDRRange = NSScreen.main?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0
                                     // display screen support HDR and current playing HDR video
                                     self.hdrAvailable = maxEDRRange > 1.0 && sigPeak > 1.0
-                                    self.playDelegate?.propertyChange(mpv: self.mpv, propertyName: propertyName, data: sigPeak)
                                 }
                             }
                         case MPVProperty.pausedForCache:
                             let buffering = UnsafePointer<Bool>(OpaquePointer(property.data))?.pointee ?? true
                             DispatchQueue.main.async {
-                                self.playDelegate?.propertyChange(mpv: self.mpv, propertyName: propertyName, data: buffering)
+                                self.isBuffering = buffering
+                                // 通知插件缓冲状态变化
+                                self.pluginManager.notifyBufferingChange(buffering)
+                            }
+                        case MPVProperty.pause:
+                            // 处理播放/暂停状态变化
+                            if let paused = UnsafePointer<Int32>(OpaquePointer(property.data))?.pointee {
+                                let isPaused = paused != 0
+                                DispatchQueue.main.async {
+                                    // 只有在已加载文件后才更新状态
+                                    if self.state == .playing || self.state == .paused {
+                                        self.state = isPaused ? .paused : .playing
+                                    }
+                                }
+                            }
+                        case MPVProperty.timePos:
+                            // 处理播放时间变化
+                            if let time = UnsafePointer<Double>(OpaquePointer(property.data))?.pointee {
+                                DispatchQueue.main.async {
+                                    self.currentTime = time
+                                    self.pluginManager.notifyTimeChange(time, duration: self.duration)
+                                }
+                            }
+                        case MPVProperty.duration:
+                            // 更新视频总时长
+                            if let dur = UnsafePointer<Double>(OpaquePointer(property.data))?.pointee {
+                                DispatchQueue.main.async {
+                                    self.duration = dur
+                                }
                             }
                         case "video-params/w":
                             // 直接从事件数据中获取宽度值
@@ -463,6 +573,22 @@ final class MPVMetalViewController: NSViewController {
                                     self.updateVideoHeight(Int(height))
                                 }
                             }
+                        case MPVProperty.volume:
+                            // 处理音量变化
+                            if let vol = UnsafePointer<Double>(OpaquePointer(property.data))?.pointee {
+                                DispatchQueue.main.async {
+                                    self.volume = vol
+                                    self.pluginManager.notifyVolumeChange(vol, isMuted: self.isMuted)
+                                }
+                            }
+                        case MPVProperty.mute:
+                            // 处理静音变化
+                            if let muted = UnsafePointer<Int32>(OpaquePointer(property.data))?.pointee {
+                                DispatchQueue.main.async {
+                                    self.isMuted = muted != 0
+                                    self.pluginManager.notifyVolumeChange(self.volume, isMuted: self.isMuted)
+                                }
+                            }
                         default: break
                         }
                     }
@@ -476,12 +602,28 @@ final class MPVMetalViewController: NSViewController {
                             self.updateVideoSize(width: width, height: height)
                         }
                     }
+                    // 文件加载完成，设置为播放状态
+                    DispatchQueue.main.async {
+                        self.state = .playing
+                    }
+                    
+                case MPV_EVENT_END_FILE:
+                    // 文件播放结束
+                    DispatchQueue.main.async {
+                        self.state = .stopped
+                        self.duration = 0
+                    }
                     
                 case MPV_EVENT_SHUTDOWN:
-                    print("event: shutdown\n");
-                    mpv_terminate_destroy(mpv);
-                    mpv = nil;
-                    break;
+                    print("event: shutdown\n")
+                    // 清理所有插件
+                    DispatchQueue.main.async {
+                        self.pluginManager.unregisterAll()
+                        self.state = .idle
+                    }
+                    mpv_terminate_destroy(mpv)
+                    mpv = nil
+                    break
                 case MPV_EVENT_LOG_MESSAGE:
                     let msg = UnsafeMutablePointer<mpv_event_log_message>(OpaquePointer(event!.pointee.data))
                     print("[\(String(cString: (msg!.pointee.prefix)!))] \(String(cString: (msg!.pointee.level)!)): \(String(cString: (msg!.pointee.text)!))", terminator: "")

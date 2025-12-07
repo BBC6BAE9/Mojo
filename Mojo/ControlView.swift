@@ -8,17 +8,27 @@
 import SwiftUI
 
 struct ControlView: View {
-    @State private var volume: Double = 0.8
-    @State private var progress: Double = 0.08
-    @State private var isPlaying: Bool = false
+    /// 控制栏插件（提供播放状态和控制能力）
+    @ObservedObject var plugin: ControlBarPlugin
+    
+    /// 用户是否正在拖动进度条
+    @State private var isSeeking: Bool = false
+    /// 拖动时的进度值
+    @State private var seekProgress: Double = 0
     
     // 拖拽相关
     @Binding var offset: CGSize
     @GestureState private var dragOffset: CGSize = .zero
     
-    // 示例时间
-    private let currentTime: TimeInterval = 3
-    private let totalTime: TimeInterval = 36
+    /// 当前显示的时间
+    private var displayTime: String {
+        if isSeeking {
+            let time = plugin.duration * seekProgress
+            return ControlBarPlugin.formatTime(time)
+        } else {
+            return plugin.currentTimeFormatted
+        }
+    }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -26,14 +36,23 @@ struct ControlView: View {
             HStack(spacing: 0) {
                 // 左侧：音量控制
                 HStack(spacing: 10) {
-                    Image(systemName: volumeIcon)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18)
+                    Button(action: { plugin.toggleMute() }) {
+                        Image(systemName: volumeIcon)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                    }
+                    .buttonStyle(.plain)
                     
-                    Slider(value: $volume, in: 0...1)
-                        .tint(.white)
-                        .frame(width: 90)
+                    Slider(
+                        value: Binding(
+                            get: { plugin.volume / 100.0 },
+                            set: { plugin.setVolume($0 * 100.0) }
+                        ),
+                        in: 0...1
+                    )
+                    .tint(.white)
+                    .frame(width: 90)
                 }
                 .frame(width: 140)
                 
@@ -41,19 +60,19 @@ struct ControlView: View {
                 
                 // 中间：播放控制
                 HStack(spacing: 24) {
-                    Button(action: {}) {
+                    Button(action: { plugin.backward() }) {
                         Image(systemName: "backward.fill")
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.primary)
                     }
                     
-                    Button(action: { isPlaying.toggle() }) {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    Button(action: { plugin.togglePlayPause() }) {
+                        Image(systemName: plugin.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 32, weight: .semibold))
                             .foregroundStyle(.primary)
                     }
                     
-                    Button(action: {}) {
+                    Button(action: { plugin.forward() }) {
                         Image(systemName: "forward.fill")
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.primary)
@@ -89,22 +108,39 @@ struct ControlView: View {
             
             // MARK: - 下排进度条
             HStack(spacing: 12) {
-                Text(formatTime(currentTime))
+                Text(displayTime)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(width: 45, alignment: .trailing)
+                    .frame(width: 50, alignment: .trailing)
                 
-                Slider(value: $progress, in: 0...1)
-                    .tint(.white)
+                Slider(
+                    value: Binding(
+                        get: { isSeeking ? seekProgress : plugin.progress },
+                        set: { seekProgress = $0 }
+                    ),
+                    in: 0...1,
+                    onEditingChanged: { editing in
+                        if editing {
+                            // 开始拖动，记录当前进度
+                            isSeeking = true
+                            seekProgress = plugin.progress
+                        } else {
+                            // 结束拖动，执行 seek
+                            plugin.seek(progress: seekProgress)
+                            isSeeking = false
+                        }
+                    }
+                )
+                .tint(.white)
                 
-                Text(formatTime(totalTime))
+                Text(plugin.durationFormatted)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(width: 45, alignment: .leading)
+                    .frame(width: 50, alignment: .leading)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 20)
         .frame(width: 480)
         .contentShape(Rectangle())
         .glassEffect(in: .rect(cornerRadius: 16))
@@ -124,21 +160,15 @@ struct ControlView: View {
     // MARK: - Helpers
     
     private var volumeIcon: String {
-        if volume == 0 {
+        if plugin.isMuted || plugin.volume == 0 {
             return "speaker.slash.fill"
-        } else if volume < 0.33 {
+        } else if plugin.volume < 33 {
             return "speaker.wave.1.fill"
-        } else if volume < 0.66 {
+        } else if plugin.volume < 66 {
             return "speaker.wave.2.fill"
         } else {
             return "speaker.wave.3.fill"
         }
-    }
-    
-    private func formatTime(_ time: TimeInterval) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
@@ -154,8 +184,10 @@ struct ControlButtonStyle: ButtonStyle {
 }
 
 #Preview {
+    @Previewable @StateObject var plugin = ControlBarPlugin()
+    
     ZStack {
         Color.black
-        ControlView(offset: .constant(.zero))
+        ControlView(plugin: plugin, offset: .constant(.zero))
     }
 }

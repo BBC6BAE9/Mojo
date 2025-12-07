@@ -14,4 +14,6 @@ struct MPVProperty {
     static let path = "path"
     static let pause = "pause"
     static let pausedForCache = "paused-for-cache"
+    static let volume = "volume"
+    static let mute = "mute"
 }

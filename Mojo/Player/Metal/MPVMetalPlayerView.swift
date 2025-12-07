@@ -1,75 +1,58 @@
+//
+//  MPVMetalPlayerView.swift
+//  Mojo
+//
+
 import Foundation
 import SwiftUI
-internal import Combine
 
 struct MPVMetalPlayerView: NSViewControllerRepresentable {
-    @ObservedObject var coordinator: Coordinator
     
-    func makeNSViewController(context: Context) -> some NSViewController {
-        let mpv =  MPVMetalViewController()
-        mpv.playDelegate = coordinator
-        mpv.playUrl = coordinator.playUrl
+    /// 要播放的 URL
+    var playUrl: URL?
+    
+    /// 要注册的插件列表
+    var plugins: [PlayerPlugin] = []
+    
+    func makeNSViewController(context: Context) -> MPVMetalViewController {
+        let player = MPVMetalViewController()
+        player.playUrl = playUrl
         
-        context.coordinator.player = mpv
-        return mpv
+        // 注册所有插件
+        for plugin in plugins {
+            player.pluginManager.register(plugin)
+        }
+        
+        return player
     }
     
-    func updateNSViewController(_ nsViewController: NSViewControllerType, context: Context) {
+    func updateNSViewController(_ nsViewController: MPVMetalViewController, context: Context) {
+        // 如果 URL 变化，加载新文件
+        if let url = playUrl, url != nsViewController.playUrl {
+            nsViewController.loadFile(url)
+        }
     }
     
-    public func makeCoordinator() -> Coordinator {
-        coordinator
-    }
+    // MARK: - Modifiers
     
+    /// 设置要播放的 URL
     func play(_ url: URL) -> Self {
-        coordinator.playUrl = url
-        return self
+        var copy = self
+        copy.playUrl = url
+        return copy
     }
     
-    func onPropertyChange(_ handler: @escaping (MPVMetalViewController, String, Any?) -> Void) -> Self {
-        coordinator.onPropertyChange = handler
-        return self
+    /// 注册单个插件
+    func registerPlugin(_ plugin: PlayerPlugin) -> Self {
+        var copy = self
+        copy.plugins.append(plugin)
+        return copy
     }
     
-    @MainActor
-    public final class Coordinator: MPVPlayerDelegate, ObservableObject {
-        weak var player: MPVMetalViewController?
-        
-        @Published var pause : Bool = false {
-            didSet {
-                if pause {
-                    self.player?.pause()
-                } else {
-                    self.player?.play()
-                }
-            }
-        }
-        
-        @Published var hdrEnabled : Bool = false {
-            didSet {
-                self.player?.hdrEnabled = hdrEnabled
-            }
-        }
-        
-        @Published var hdrAvailable : Bool = false
-        @Published var edrRange : String = "1.0"
-        
-        var playUrl : URL?
-        var onPropertyChange: ((MPVMetalViewController, String, Any?) -> Void)?
-        
-        func play(_ url: URL) {
-            player?.loadFile(url)
-            self.pause = false
-        }
-        
-        func seek(relative time: TimeInterval) {
-            player?.seek(relative: time)
-        }
-        
-        func propertyChange(mpv: OpaquePointer, propertyName: String, data: Any?) {
-            guard let player else { return }
-            self.onPropertyChange?(player, propertyName, data)
-        }
+    /// 注册多个插件
+    func registerPlugins(_ plugins: [PlayerPlugin]) -> Self {
+        var copy = self
+        copy.plugins.append(contentsOf: plugins)
+        return copy
     }
 }
-
