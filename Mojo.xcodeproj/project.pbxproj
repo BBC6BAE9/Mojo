@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		870089502EE545C70006183A /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8700894F2EE545C70006183A /* MPVKit */; };
 		F15B201B2EE4800B009089D7 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = F15B201A2EE4800B009089D7 /* MPVKit */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F15B201B2EE4800B009089D7 /* MPVKit in Frameworks */,
+				870089502EE545C70006183A /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = Mojo;
 			packageProductDependencies = (
 				F15B201A2EE4800B009089D7 /* MPVKit */,
+				8700894F2EE545C70006183A /* MPVKit */,
 			);
 			productName = Mojo;
 			productReference = F15B200B2EE47FD5009089D7 /* Mojo.app */;
@@ -101,7 +104,7 @@
 			mainGroup = F15B20022EE47FD5009089D7;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F15B20192EE4800B009089D7 /* XCLocalSwiftPackageReference "Packages/MPVKit" */,
+				8700894E2EE545C70006183A /* XCLocalSwiftPackageReference "Packages/MPVKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F15B200C2EE47FD5009089D7 /* Products */;
@@ -362,13 +365,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		F15B20192EE4800B009089D7 /* XCLocalSwiftPackageReference "Packages/MPVKit" */ = {
+		8700894E2EE545C70006183A /* XCLocalSwiftPackageReference "Packages/MPVKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/MPVKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		8700894F2EE545C70006183A /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MPVKit;
+		};
 		F15B201A2EE4800B009089D7 /* MPVKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MPVKit;

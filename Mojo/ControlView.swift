@@ -15,14 +15,21 @@ struct ControlView: View {
     @State private var isSeeking: Bool = false
     /// 拖动时的进度值
     @State private var seekProgress: Double = 0
+    /// 是否正在等待 seek 完成
+    @State private var isWaitingForSeek: Bool = false
     
     // 拖拽相关
     @Binding var offset: CGSize
     @GestureState private var dragOffset: CGSize = .zero
     
+    /// 是否应该显示拖动位置（拖动中或等待 seek 完成）
+    private var shouldShowSeekPosition: Bool {
+        isSeeking || isWaitingForSeek
+    }
+    
     /// 当前显示的时间
     private var displayTime: String {
-        if isSeeking {
+        if shouldShowSeekPosition {
             let time = plugin.duration * seekProgress
             return ControlBarPlugin.formatTime(time)
         } else {
@@ -115,7 +122,7 @@ struct ControlView: View {
                 
                 Slider(
                     value: Binding(
-                        get: { isSeeking ? seekProgress : plugin.progress },
+                        get: { shouldShowSeekPosition ? seekProgress : plugin.progress },
                         set: { seekProgress = $0 }
                     ),
                     in: 0...1,
@@ -123,15 +130,23 @@ struct ControlView: View {
                         if editing {
                             // 开始拖动，记录当前进度
                             isSeeking = true
+                            isWaitingForSeek = false
                             seekProgress = plugin.progress
                         } else {
-                            // 结束拖动，执行 seek
-                            plugin.seek(progress: seekProgress)
+                            // 结束拖动，执行 seek，保持显示 seekProgress 直到播放位置接近
                             isSeeking = false
+                            isWaitingForSeek = true
+                            plugin.seek(progress: seekProgress)
                         }
                     }
                 )
                 .tint(.white)
+                .onChange(of: plugin.progress) { _, newProgress in
+                    // 当播放位置接近 seek 目标时，停止等待
+                    if isWaitingForSeek && abs(newProgress - seekProgress) < 0.02 {
+                        isWaitingForSeek = false
+                    }
+                }
                 
                 Text(plugin.durationFormatted)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
