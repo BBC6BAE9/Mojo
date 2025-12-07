@@ -14,6 +14,9 @@ struct ContentView: View {
     @State var showControlOverlay = false
     @State var loading = false
     
+    // 播控拖拽位置（默认向上偏移 60pt）
+    @State private var controlOffset: CGSize = CGSize(width: 0, height: -60)
+    
     var body: some View {
         VStack {
             MPVMetalPlayerView(coordinator: coordinator)
@@ -35,10 +38,8 @@ struct ContentView: View {
         .containerBackground(.yellow, for: .window)
         .focusable()
         .focusEffectDisabled()
-        .overlay{
-//            RoundedRectangle(cornerRadius: 16)
-//                .frame(width: 500.0, height: 100.0)
-//                .glassEffect(in: .rect(cornerRadius: 16.0))
+        .overlay(alignment: .bottom) {
+            ControlView(offset: $controlOffset)
         }
 //        .overlay {
 //            HStack {
