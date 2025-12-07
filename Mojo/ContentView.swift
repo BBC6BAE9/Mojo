@@ -17,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         VStack {
             MPVMetalPlayerView(coordinator: coordinator)
-                .play(URL(string: "http://192.161.51.202:8096/emby/Videos/595618/stream?Static=true&api_key=0188a76fdedf433183c338f0fec97e92")!)
+                .play(URL(string: "http://192.161.51.202:8096/emby/Videos/327842/stream?Static=true&api_key=0188a76fdedf433183c338f0fec97e92")!)
                 .onPropertyChange{ player, propertyName, propertyData in
                     switch propertyName {
                     case MPVProperty.videoParamsSigPeak:
@@ -34,6 +34,7 @@ struct ContentView: View {
         }
         .containerBackground(.yellow, for: .window)
         .focusable()
+        .focusEffectDisabled()
         .overlay{
 //            RoundedRectangle(cornerRadius: 16)
 //                .frame(width: 500.0, height: 100.0)
